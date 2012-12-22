@@ -1,0 +1,15 @@
+# Order of columns:
+# address;login;password;protocol
+#
+# Login and/or password can be empty.
+# Protocol can be 'ssh', 'telnet' or empty for autodiscovery.
+#
+# Whitespaces are automatically removed from beginning of each line.
+#
+# Following lines will be ignored:
+# - empty
+# - begginning with comment (#)
+#
+# Example:
+device1.company.net;admin;SeCuRePaSsWoRd;ssh
+10.0.0.1;;MyDefaultPass;

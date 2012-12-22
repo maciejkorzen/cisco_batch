@@ -1,0 +1,86 @@
+# !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+# !!!Scripts below are only examples!!!
+# !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#
+vtp mode client
+vtp password PaSsWoRdExAmPlE
+vtp domain vtpdom1
+no vtp password
+vtp version 1
+snmp-server location Poland;PcimDolny
+
+###########################################
+show interfaces trunk
+show vlan brief
+show inventory
+show vtp status
+sh running-config
+
+###########################################
+conf t
+cdp advertise-v2
+cdp run
+end
+
+###########################################
+show run | include spanning-tree
+show vlan
+sh run brief | include spanning-tree mode
+sh run brief | include vtp
+
+###########################################
+conf t
+spanning-tree mode rapid-pvst
+ntp server 192.168.44.55
+no logging cns-events
+file verify auto
+ip http server
+ip subnet-zero
+vtp mode transparent
+no vtp password
+no vlan 15
+vlan 2
+name Aaaaaa
+exit
+vlan 4
+name Bbbbbb
+exit
+vlan 5
+name Cccccc
+exit
+logging 10.0.55.33
+no logging 10.2.3.4
+logging trap 6
+logging trap informational
+snmp-server enable traps
+no snmp-server host 10.5.3.46 public
+snmp-server host 10.6.23.13 public
+snmp-server community public ro
+snmp-server contact admin\@domain.com
+service password-encryption
+line console 0
+password PasswordPassword
+login
+exec-timeout 480
+session-timeout 480
+length 0
+exit
+line vty 0 15
+password PasswordPassword
+login
+exec-timeout 480
+session-timeout 480
+length 0
+exit
+enable secret PasswordPassword
+no enable password
+ip domain-name dmain.com
+hostname __ADDRESS__
+ip domain list domain2.net
+ip name-server 10.3.33.51
+ip name-server 10.3.33.93
+ip default-gateway 192.168.222.1
+service timestamps debug datetime msec
+service timestamps log datetime msec
+service sequence-numbers
+end

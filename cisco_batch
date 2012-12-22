@@ -1,0 +1,279 @@
+#!/usr/bin/perl
+##### LICENSE ###############################################################
+# Copyright 2012 Maciej Korzen
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#
+##### AUTHOR ################################################################
+# Maciej Korzen
+# maciek@korzen.org, mkorzen@gmail.com
+# http://www.korzen.org/
+
+use File::Basename;
+use Getopt::Std;
+use IO::Socket;
+use Net::Telnet::Cisco;
+use Net::Appliance::Session;
+
+my $myname = basename($0);
+(my $sec, my $min, my $hour, my $mday, my $mon, my $year) = (localtime(time))[0,1,2,3,4,5];
+$year += 1900;
+$mon += 1;
+my $devices = "./devices.csv";
+my $commands_script = "./batch.script";
+my $tftp_server = "";
+my @commands;
+my $timestamp = sprintf("%u%02u%02u_%02u%02u%02u", $year, $mon, $mday, $hour, $min, $sec);
+my $copy_running_startup = 0;
+
+sub print_devices_output
+{
+	foreach my $a (@_)
+	{
+		chomp($a);
+		if ($a =~ /^\s*$/)
+		{
+			next;
+		}
+		if (length($a) > 0)
+		{
+			$a =~ s/^\n*//;
+			$a =~ s/\n/\n<< /g;
+			$a =~ s/%/%%/g;
+			printf("<< $a\n");
+		}
+	}
+}
+
+sub usage
+{
+	print "Usage: " . $myname . " [-c commands-file] [-d devices-file.csv] [-t tftp-addr] [-h]\n
+	-c		File with list of commands to execute. Default value is '$commands_script'.
+	-d		CSV file with list of devices and creditenials. Default value is '$devices'.
+	-t tftp-addr	Before running script make a backup of running-config to a TFTP server 'tftp-addr'.
+	-s		After running script, copy running-config to startup-config.
+	-h		This help\n";
+}
+
+sub processArgs
+{
+	my %options=();
+
+	if (!getopts("c:d:t:sh", \%options))
+	{
+		usage();
+		exit(1);
+	}
+
+	if (defined($options{h}))
+	{
+		usage();
+		exit(0);
+	}
+
+	$devices = $options{d} if defined($options{d});
+	$commands_script = $options{c} if defined($options{c});
+	$tftp_server = $options{t} if defined($options{t});
+	$copy_running_startup = 1 if defined($options{s});
+}
+
+sub prepare_script
+{
+	my $file = $_[0];
+	my @ret;
+	open(COMMANDS_SCRIPT, "<$file") or die "Can't open commands script file'" . $commands_script . "'";
+	while(<COMMANDS_SCRIPT>)
+	{
+		chomp;
+		$_ = m/(.*)/;
+		$_ = $1;
+		my $line = $_;
+		$line =~ s/^\s+//;
+		if ($line =~ m/^(#|$)/)
+		{
+			next;
+		}
+		push(@ret, $line);
+	}
+	close(COMMANDS_SCRIPT);
+	return(@ret);
+}
+
+sub doTelnet
+{
+	(my $address, my $login, my $password) = @_;
+	my $session = Net::Telnet::Cisco->new(Host => $address, Timeout => 20);
+	$session->login($login, $password);
+
+	if ($session->enable($password))
+	{
+		if (length($tftp_server) > 0)
+		{
+			my @output = $session->cmd('copy running-config tftp://' . $tftp_server . '/' . $address . "-config-" . $timestamp . "\n\n\n");
+			print_devices_output(@output);
+		}
+
+		foreach my $line (@commands)
+		{
+			my $line2 = "$line";
+			$line2 =~ s/__ADDRESS__/$address/g;
+			@output = $session->cmd($line2);
+			printf("CMD: " . $line2 . "\n");
+			print_devices_output(@output);
+		}
+
+		if ($copy_running_startup eq 1)
+		{
+			@output = $session->cmd("copy running-config startup-config\n\n\n");
+			print_devices_output(@output);
+		}
+	} else {
+		warn "Can't enable: " . $session->errmsg;
+	}
+
+	$session->close;
+}
+
+sub print_input
+{
+	$string = $_[0];
+	$string =~ s/\n*$//;
+	printf(">> " . $string . "\n");
+}
+
+sub run_command
+{
+	my $session = $_[0];
+	my $command = $_[1];
+	$session->say($command);
+	sleep(1);
+	my @output = $session->gather();
+	print_devices_output(@output);
+	print("\n");
+}
+
+sub doSsh
+{
+	(my $address, my $login, my $password) = @_;
+	my $s = Net::Appliance::Session->new({
+		personality => 'ios',
+		transport => 'SSH',
+		host => $address,
+		connect_options =>
+		{
+			opts => [
+				'-o', 'ConnectTimeout=10'
+			]
+		}
+	});
+
+	try {
+		$s->connect({ username => $login, password => $password });
+		$s->begin_privileged({ password => $password });
+
+		if (length($tftp_server) > 0)
+		{
+			run_command($s, 'copy running-config tftp://' . $tftp_server . '/' . $address . "-config-" . $timestamp . "\n\n\n");
+		}
+
+		foreach my $line (@commands)
+		{
+			my $line2 = "$line";
+			$line2 =~ s/__ADDRESS__/$address/g;
+			try {
+				run_command($s, $line2);
+			}
+			catch {
+				warn "failed to execute command: $line";
+			}
+		}
+		if ($copy_running_startup eq 1)
+		{
+			run_command($s, "copy running-config startup-config\n\n\n");
+		}
+		$s->end_privileged;
+	}
+	catch {
+		warn "problem with device $address";
+	}
+	finally {
+		$s->close;
+	};
+}
+
+sub test_tcp_port
+{
+	(my $address, my $port) = @_;
+	my $sock = new IO::Socket::INET
+	(
+		PeerAddr => $address,
+		PeerPort => $port,
+		Proto => 'tcp',
+		Timeout => 10
+	);
+	if ($sock)
+	{
+		close($sock);
+		return(1);
+	} else {
+		return(0);
+	}
+}
+
+processArgs();
+
+$devices =~ m/(.*)/;
+$devices = $1;
+$commands_script =~ m/(.*)/;
+$commands_script = $1;
+
+@commands = prepare_script($commands_script);
+
+open(DEVS, "<$devices") or die "Can't open file with list of devices '" . $devices . "'";
+
+while(<DEVS>)
+{
+	chomp;
+	$_ = m/(.*)/;
+	$_ = $1;
+	my $line = $_;
+	$line =~ s/^\s+//;
+	if ($line =~ m/^(#|$)/)
+	{
+		next;
+	}
+	(my $address, my $login, my $password, my $protocol) = split(/;/, $_);
+	printf("=== address: " . $address . "; protocol: " . ($protocol ? $protocol : "auto") . " ===\n");
+	if ($protocol eq "")
+	{
+		if (test_tcp_port($address, 22))
+		{
+			$protocol = "ssh";
+		}
+		elsif (test_tcp_port($address, 23)) {
+			$protocol = "telnet";
+		}
+		else {
+			warn "Protocol autodetection failed"
+		}
+	}
+	if ($protocol eq "telnet")
+	{
+		doTelnet($address, $login, $password);
+	} elsif ($protocol eq "ssh") {
+		doSsh($address, $login, $password);
+	}
+}
+close(DEVS);
