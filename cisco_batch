@@ -24,8 +24,8 @@
 use File::Basename;
 use Getopt::Std;
 use IO::Socket;
-use Net::Telnet::Cisco;
 use Net::Appliance::Session;
+use Net::Telnet::Cisco;
 
 my $myname = basename($0);
 (my $sec, my $min, my $hour, my $mday, my $mon, my $year) = (localtime(time))[0,1,2,3,4,5];
@@ -129,9 +129,16 @@ sub doTelnet
 		{
 			my $line2 = "$line";
 			$line2 =~ s/__ADDRESS__/$address/g;
-			@output = $session->cmd($line2);
-			printf("CMD: " . $line2 . "\n");
-			print_devices_output(@output);
+			try
+			{
+				@output = $session->cmd($line2);
+				printf("CMD: " . $line2 . "\n");
+				print_devices_output(@output);
+			}
+			catch
+			{
+				warn "Error executing command '" . $line2 . "'.\n";
+			}
 		}
 
 		if ($copy_running_startup eq 1)
