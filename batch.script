@@ -1,7 +1,7 @@
 # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 # !!!Scripts below are only examples!!!
 # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-#
+
 vtp mode client
 vtp password PaSsWoRdExAmPlE
 vtp domain vtpdom1
