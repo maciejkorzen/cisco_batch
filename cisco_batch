@@ -37,9 +37,14 @@ my $tftp_server = "";
 my @commands;
 my $timestamp = sprintf("%u%02u%02u_%02u%02u%02u", $year, $mon, $mday, $hour, $min, $sec);
 my $copy_running_startup = 0;
+my $quiet = 0;
 
 sub print_devices_output
 {
+	if ($quiet == 1)
+	{
+		return;
+	}
 	foreach my $a (@_)
 	{
 		chomp($a);
@@ -59,19 +64,22 @@ sub print_devices_output
 
 sub usage
 {
-	print "Usage: " . $myname . " [-c commands-file] [-d devices-file.csv] [-t tftp-addr] [-h]\n
+	print "Usage: " . $myname . " [-c commands-file] [-d devices-file.csv] [-t tftp-addr] [-q] [-h]\n
 	-c		File with list of commands to execute. Default value is '$commands_script'.
 	-d		CSV file with list of devices and creditenials. Default value is '$devices'.
 	-t tftp-addr	Before running script make a backup of running-config to a TFTP server 'tftp-addr'.
 	-s		After running script, copy running-config to startup-config.
-	-h		This help\n";
+	-q		Quiet. Suppress all output. Display only error messages.
+	-h		This help
+
+You have to select at least one action (-c, -t, -s).\n";
 }
 
 sub processArgs
 {
 	my %options=();
 
-	if (!getopts("c:d:t:sh", \%options))
+	if (!getopts("c:d:t:sqh", \%options))
 	{
 		usage();
 		exit(1);
@@ -87,12 +95,17 @@ sub processArgs
 	$commands_script = $options{c} if defined($options{c});
 	$tftp_server = $options{t} if defined($options{t});
 	$copy_running_startup = 1 if defined($options{s});
+	$quiet = 1 if defined($options{q});
 }
 
 sub prepare_script
 {
 	my $file = $_[0];
 	my @ret;
+	if (! -e $file)
+	{
+		return(0);
+	}
 	open(COMMANDS_SCRIPT, "<$file") or die "Can't open commands script file'" . $commands_script . "'";
 	while(<COMMANDS_SCRIPT>)
 	{
@@ -132,12 +145,12 @@ sub doTelnet
 			try
 			{
 				@output = $session->cmd($line2);
-				printf("CMD: " . $line2 . "\n");
+				printf("CMD: " . $line2 . "\n") if ($quiet == 0);
 				print_devices_output(@output);
 			}
 			catch
 			{
-				warn "Error executing command '" . $line2 . "'.\n";
+				warn "Error executing command '" . $line2 . "' on device " . $address . ".\n";
 			}
 		}
 
@@ -147,7 +160,7 @@ sub doTelnet
 			print_devices_output(@output);
 		}
 	} else {
-		warn "Can't enable: " . $session->errmsg;
+		warn "Can't enable on device " . $address . ": " . $session->errmsg;
 	}
 
 	$session->close;
@@ -155,6 +168,10 @@ sub doTelnet
 
 sub print_input
 {
+	if ($quiet == 1)
+	{
+		return;
+	}
 	$string = $_[0];
 	$string =~ s/\n*$//;
 	printf(">> " . $string . "\n");
@@ -168,7 +185,7 @@ sub run_command
 	sleep(1);
 	my @output = $session->gather();
 	print_devices_output(@output);
-	print("\n");
+	print("\n") if ($quiet == 0);
 }
 
 sub doSsh
@@ -203,7 +220,7 @@ sub doSsh
 				run_command($s, $line2);
 			}
 			catch {
-				warn "failed to execute command: $line";
+				warn "Failed to execute command '" . $line . "' on device " . $address . ".";
 			}
 		}
 		if ($copy_running_startup eq 1)
@@ -213,7 +230,7 @@ sub doSsh
 		$s->end_privileged;
 	}
 	catch {
-		warn "problem with device $address";
+		warn "Problem with device $address.";
 	}
 	finally {
 		$s->close;
@@ -250,6 +267,12 @@ $commands_script = $1;
 
 open(DEVS, "<$devices") or die "Can't open file with list of devices '" . $devices . "'";
 
+if (("@commands" eq "0") && ($tftp_server eq "") && ($copy_running_startup == 0))
+{
+	usage();
+	exit(1);
+}
+
 while(<DEVS>)
 {
 	chomp;
@@ -262,7 +285,7 @@ while(<DEVS>)
 		next;
 	}
 	(my $address, my $login, my $password, my $protocol) = split(/;/, $_);
-	printf("=== address: " . $address . "; protocol: " . ($protocol ? $protocol : "auto") . " ===\n");
+	printf("=== address: " . $address . "; protocol: " . ($protocol ? $protocol : "auto") . " ===\n") if ($quiet == 0);
 	if ($protocol eq "")
 	{
 		if (test_tcp_port($address, 22))
@@ -273,7 +296,7 @@ while(<DEVS>)
 			$protocol = "telnet";
 		}
 		else {
-			warn "Protocol autodetection failed"
+			warn "Protocol autodetection failed for device $address.";
 		}
 	}
 	if ($protocol eq "telnet")
@@ -283,4 +306,6 @@ while(<DEVS>)
 		doSsh($address, $login, $password);
 	}
 }
+
 close(DEVS);
+
